@@ -1,8 +1,6 @@
 import { haversineDistance } from './routing';
 
-// ---------------------------------------------------------------------------
-// Min-heap priority queue for Dijkstra
-// ---------------------------------------------------------------------------
+// Min-heap priority queue
 class MinHeap {
   constructor() { this.h = []; }
   get size() { return this.h.length; }
@@ -32,19 +30,12 @@ class MinHeap {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Graph helpers
-// ---------------------------------------------------------------------------
 function addEdge(edges, from, to, dist) {
   if (!edges.has(from)) edges.set(from, []);
   edges.get(from).push({ neighborId: to, distance: dist });
 }
 
-/**
- * Parse raw Overpass JSON into { nodes: Map, edges: Map }.
- * nodes: id → { lat, lon }
- * edges: id → [{ neighborId, distance }]
- */
+// Parse Overpass JSON into a graph
 export function buildBaseGraph(osmData) {
   const nodes = new Map();
   const edges = new Map();
@@ -68,31 +59,53 @@ export function buildBaseGraph(osmData) {
   return { nodes, edges };
 }
 
-/**
- * Find the nearest node in `nodes` to (lat, lon).
- * Returns null if nothing is within maxDistM metres.
- */
-export function findNearestNode(nodes, lat, lon, maxDistM = 300) {
-  let bestId = null, bestDist = Infinity;
+const CELL_DEG = 0.003;
+
+function cellIndex(deg) { return Math.floor(deg / CELL_DEG); }
+
+// Bucket node ids into a lat/lon grid
+export function buildSpatialIndex(nodes) {
+  const grid = new Map();
   for (const [id, node] of nodes) {
+    const key = `${cellIndex(node.lat)}:${cellIndex(node.lon)}`;
+    let bucket = grid.get(key);
+    if (!bucket) { bucket = []; grid.set(key, bucket); }
+    bucket.push(id);
+  }
+  return grid;
+}
+
+// Node ids in grid cells covering radiusM around a point
+function candidateIds(index, lat, lon, radiusM) {
+  const mPerCellLat = CELL_DEG * 111320;
+  const mPerCellLon = Math.max(mPerCellLat * Math.cos(lat * Math.PI / 180), 1);
+  const latReach = Math.ceil(radiusM / mPerCellLat) + 1;
+  const lonReach = Math.ceil(radiusM / mPerCellLon) + 1;
+  const ci = cellIndex(lat), cj = cellIndex(lon);
+  const ids = [];
+  for (let i = ci - latReach; i <= ci + latReach; i++) {
+    for (let j = cj - lonReach; j <= cj + lonReach; j++) {
+      const bucket = index.get(`${i}:${j}`);
+      if (bucket) for (const id of bucket) ids.push(id);
+    }
+  }
+  return ids;
+}
+
+// Nearest node within maxDistM meters
+export function findNearestNode(nodes, lat, lon, maxDistM = 300, index = null) {
+  const ids = index ? candidateIds(index, lat, lon, maxDistM) : nodes.keys();
+  let bestId = null, bestDist = Infinity;
+  for (const id of ids) {
+    const node = nodes.get(id);
     const d = haversineDistance(lat, lon, node.lat, node.lon);
     if (d < bestDist) { bestDist = d; bestId = id; }
   }
   return bestDist <= maxDistM ? bestId : null;
 }
 
-/**
- * Build a combined routing graph by cloning the base OSM graph and adding
- * custom shortcut paths as additional edges.
- *
- * Synthetic node IDs use the format  `sc:${featureId}:${index}`
- * so they can be traced back to the originating feature.
- *
- * Each shortcut's first and last points are snapped (connected by an edge)
- * to the nearest OSM node within 200 m so the router can enter/exit them.
- *
- * Returns { nodes, edges, syntheticToFeatureId }
- */
+// Merge drawn shortcuts into the base graph
+// Synthetic node ids: sc:featureId:index
 export function buildRoutingGraph(baseGraph, shortcuts) {
   // Deep-clone the base graph
   const nodes = new Map(baseGraph.nodes);
@@ -102,6 +115,7 @@ export function buildRoutingGraph(baseGraph, shortcuts) {
   }
 
   const syntheticToFeatureId = new Map();
+  const baseIndex = buildSpatialIndex(baseGraph.nodes);
 
   for (const feature of shortcuts.features) {
     const coords = feature.geometry.coordinates; // [[lng, lat], ...]
@@ -122,13 +136,14 @@ export function buildRoutingGraph(baseGraph, shortcuts) {
       addEdge(edges, ids[i + 1], ids[i], dist);
     }
 
-    // Snap both endpoints to the nearest OSM nodes (up to 3) within 500 m
+    // Snap endpoints to up to 3 nearest base nodes within 500 m
     for (const [synthId, epLat, epLon] of [
       [ids[0],               coords[0][1],               coords[0][0]],
       [ids[coords.length-1], coords[coords.length-1][1], coords[coords.length-1][0]],
     ]) {
       const nearby = [];
-      for (const [osmId, osmNode] of baseGraph.nodes) {
+      for (const osmId of candidateIds(baseIndex, epLat, epLon, 500)) {
+        const osmNode = baseGraph.nodes.get(osmId);
         const d = haversineDistance(epLat, epLon, osmNode.lat, osmNode.lon);
         if (d <= 500) nearby.push({ osmId, d });
       }
@@ -140,34 +155,38 @@ export function buildRoutingGraph(baseGraph, shortcuts) {
     }
   }
 
-  return { nodes, edges, syntheticToFeatureId };
+  const index = buildSpatialIndex(nodes);
+  return { nodes, edges, syntheticToFeatureId, index };
 }
 
-/**
- * Dijkstra shortest path.
- * Returns { coords: [[lng,lat],...], pathNodeIds: [...], totalDistM: number }
- * or null if no path exists.
- */
-export function runDijkstra(nodes, edges, startId, endId) {
-  const dist = new Map([[startId, 0]]);
+// A* shortest path with haversine heuristic
+export function runAStar(nodes, edges, startId, endId) {
+  const goal = nodes.get(endId);
+  const heuristic = (id) => {
+    const n = nodes.get(id);
+    return haversineDistance(n.lat, n.lon, goal.lat, goal.lon);
+  };
+
+  const gScore = new Map([[startId, 0]]);
   const prev = new Map();
   const visited = new Set();
   const pq = new MinHeap();
-  pq.push({ id: startId, d: 0 });
+  pq.push({ id: startId, d: heuristic(startId) });
 
   while (pq.size > 0) {
-    const { id, d } = pq.pop();
+    const { id } = pq.pop();
     if (visited.has(id)) continue;
     visited.add(id);
     if (id === endId) break;
 
+    const g = gScore.get(id);
     for (const { neighborId, distance } of (edges.get(id) || [])) {
       if (visited.has(neighborId)) continue;
-      const nd = d + distance;
-      if (!dist.has(neighborId) || nd < dist.get(neighborId)) {
-        dist.set(neighborId, nd);
+      const tentative = g + distance;
+      if (!gScore.has(neighborId) || tentative < gScore.get(neighborId)) {
+        gScore.set(neighborId, tentative);
         prev.set(neighborId, id);
-        pq.push({ id: neighborId, d: nd });
+        pq.push({ id: neighborId, d: tentative + heuristic(neighborId) });
       }
     }
   }
@@ -182,5 +201,5 @@ export function runDijkstra(nodes, edges, startId, endId) {
     .filter(Boolean)
     .map(n => [n.lon, n.lat]);
 
-  return { coords, pathNodeIds, totalDistM: dist.get(endId) ?? 0 };
+  return { coords, pathNodeIds, totalDistM: gScore.get(endId) ?? 0 };
 }
