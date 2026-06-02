@@ -39,13 +39,17 @@ paths that are folded into the routing graph.
    | `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | Firebase messaging sender id |
    | `NEXT_PUBLIC_FIREBASE_APP_ID` | Firebase app id |
    | `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID` | Analytics measurement id (optional) |
-   | `NEXT_PUBLIC_ADMIN_EMAILS` | Comma-separated emails granted admin (draw/delete paths) |
 
 4. Deploy the Firestore security rules (requires the Firebase CLI):
 
    ```bash
    npx firebase deploy --only firestore:rules
    ```
+
+5. Grant yourself admin so you can draw and delete paths: sign in once through the app to create
+   your account, find your user id in the Firebase console under Authentication, then create a
+   document at `admins/{your-user-id}` in Firestore (any contents). Any user with a matching
+   document in the `admins` collection is treated as an admin.
 
 ## Running
 
@@ -55,8 +59,8 @@ Start the development server:
 npm run dev
 ```
 
-Open http://localhost:3000 and sign in with an account you create through the app. To act as an
-admin, sign in with an email listed in `NEXT_PUBLIC_ADMIN_EMAILS`.
+Open http://localhost:3000 and sign in with an account you create through the app. Admin controls
+appear for accounts listed in the `admins` collection (see setup step 5).
 
 ## Production build
 

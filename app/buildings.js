@@ -1,6 +1,6 @@
-// Coordinates sourced from OpenStreetMap (Overpass API) — accurate as of 2026
+// Coordinates from OpenStreetMap, accurate as of 2026
 export const UC_BUILDINGS = [
-  // --- Academic Buildings ---
+  // Academic Buildings
   { name: "Aronoff Center", category: "Academic", lng: -84.5187107, lat: 39.1343389 },
   { name: "Arts & Sciences Hall", category: "Academic", lng: -84.5190848, lat: 39.1318708 },
   { name: "Baldwin Hall", category: "Academic", lng: -84.5167338, lat: 39.1328570 },
@@ -26,11 +26,11 @@ export const UC_BUILDINGS = [
   { name: "Morgens Hall", category: "Academic", lng: -84.5119855, lat: 39.1349633 },
   { name: "Alms Building", category: "Academic", lng: -84.5194638, lat: 39.1339502 },
 
-  // --- DAAP ---
+  // DAAP
   { name: "DAAP (College of Design, Art, Architecture & Planning)", category: "Academic", lng: -84.5186728, lat: 39.1345285 },
   { name: "Computer Graphics Center", category: "Academic", lng: -84.5186473, lat: 39.1342116 },
 
-  // --- CCM (College-Conservatory of Music) ---
+  // CCM
   { name: "Patricia Corbett Theatre", category: "Arts & Performance", lng: -84.5187556, lat: 39.1295605 },
   { name: "Corbett Center for Performing Arts", category: "Arts & Performance", lng: -84.5183133, lat: 39.1294953 },
   { name: "Corbett Auditorium", category: "Arts & Performance", lng: -84.5182129, lat: 39.1296273 },
@@ -40,7 +40,7 @@ export const UC_BUILDINGS = [
   { name: "Mantei Center", category: "Arts & Performance", lng: -84.5155439, lat: 39.1332497 },
   { name: "Rockwern Band Center", category: "Arts & Performance", lng: -84.5139423, lat: 39.1293821 },
 
-  // --- Medical Campus ---
+  // Medical Campus
   { name: "Barrett Cancer Center", category: "Medical", lng: -84.5045041, lat: 39.1367405 },
   { name: "Cardiovascular Research Center", category: "Medical", lng: -84.5029684, lat: 39.1384846 },
   { name: "Hoxworth Blood Center", category: "Medical", lng: -84.5017912, lat: 39.1363013 },
@@ -53,7 +53,7 @@ export const UC_BUILDINGS = [
   { name: "Kettering Lab / Andrew Breidenbach Environmental Research Center", category: "Medical", lng: -84.5109608, lat: 39.1365641 },
   { name: "William Cooper Procter Hall", category: "Medical", lng: -84.5083070, lat: 39.1360118 },
 
-  // --- Libraries ---
+  // Libraries
   { name: "Langsam Library", category: "Library", lng: -84.51566856049095, lat: 39.13384181132681 },
   { name: "Blegen Library", category: "Library", lng: -84.5193133, lat: 39.1295879 },
   { name: "DAAP Library", category: "Library", lng: -84.5192644, lat: 39.1344516 },
@@ -62,7 +62,7 @@ export const UC_BUILDINGS = [
   { name: "Chemistry-Biology Library", category: "Library", lng: -84.5167116, lat: 39.1339696 },
   { name: "College of Engineering & Applied Science Library", category: "Library", lng: -84.5167741, lat: 39.1330016 },
 
-  // --- Student Life ---
+  // Student Life
   { name: "Tangeman University Center (TUC)", category: "Student Life", lng: -84.5174707, lat: 39.1315148 },
   { name: "Steger Student Life Center", category: "Student Life", lng: -84.5165363, lat: 39.1323814 },
   { name: "University Pavilion", category: "Student Life", lng: -84.5185613, lat: 39.1309666 },
@@ -71,7 +71,7 @@ export const UC_BUILDINGS = [
   { name: "UC Department of Public Safety", category: "Student Life", lng: -84.5124404, lat: 39.1291562 },
   { name: "YMCA University Branch", category: "Student Life", lng: -84.5179440, lat: 39.1286466 },
 
-  // --- Recreation & Athletics ---
+  // Recreation and Athletics
   { name: "Armory Fieldhouse", category: "Recreation", lng: -84.5139491, lat: 39.1318310 },
   { name: "Fifth Third Arena", category: "Recreation", lng: -84.51351169821177, lat: 39.13105546016999 },
   { name: "Nippert Stadium", category: "Recreation", lng: -84.51623555614022, lat: 39.13122771301894 },
@@ -83,7 +83,7 @@ export const UC_BUILDINGS = [
   ]},
   { name: "Sheakley Lawn", category: "Recreation", lng: -84.51475577506629, lat: 39.130158474696664 },
 
-  // --- Dining & Cafes ---
+  // Dining and Cafes
   { name: "MarketPointe (Dining Hall)", category: "Dining", lng: -84.5171268, lat: 39.1289811 },
   { name: "CenterCourt (Dining Hall)", category: "Dining", lng: -84.5157350, lat: 39.1321427 },
   { name: "Catskellar", category: "Dining", lng: -84.5172353, lat: 39.1315312 },
@@ -104,7 +104,7 @@ export const UC_BUILDINGS = [
   { name: "Tim Hortons", category: "Dining", lng: -84.5121285, lat: 39.1334062 },
   { name: "Einstein Bros. Bagels", category: "Dining", lng: -84.5196557, lat: 39.1419176 },
 
-  // --- Residence Halls ---
+  // Residence Halls
   { name: "Calhoun Hall (Residence)", category: "Housing", lng: -84.5170164, lat: 39.1286518 },
   { name: "Morgens Hall (Residence)", category: "Housing", lng: -84.5119855, lat: 39.1349633 },
   { name: "Scioto Hall (Residence)", category: "Housing", lng: -84.5120000, lat: 39.1343069 },
@@ -113,7 +113,7 @@ export const UC_BUILDINGS = [
   { name: "University Park Apartments South", category: "Housing", lng: -84.5151872, lat: 39.1284260 },
   { name: "Stratford Heights", category: "Housing", lng: -84.5213601, lat: 39.1308667 },
 
-  // --- Parking ---
+  // Parking
   { name: "Campus Green Garage", category: "Parking", lng: -84.5144030, lat: 39.1349637 },
   { name: "CCM Garage", category: "Parking", lng: -84.5172101, lat: 39.1300173 },
   { name: "Varsity Village Garage", category: "Parking", lng: -84.5159317, lat: 39.1301692 },
@@ -123,18 +123,6 @@ export const UC_BUILDINGS = [
   { name: "Goodman Street Garage", category: "Parking", lng: -84.5030536, lat: 39.1363966 },
 ];
 
-const CATEGORY_COLORS = {
-  "Academic": "🎓",
-  "Arts & Performance": "🎭",
-  "Medical": "🏥",
-  "Library": "📚",
-  "Student Life": "🐾",
-  "Recreation": "🏟️",
-  "Dining": "🍽️",
-  "Housing": "🏠",
-  "Parking": "🅿️",
-};
-
 export function searchBuildings(query) {
   const q = query.toLowerCase().trim();
   if (q.length < 2) return [];
@@ -142,5 +130,3 @@ export function searchBuildings(query) {
     b.name.toLowerCase().includes(q) || b.category.toLowerCase().includes(q)
   ).slice(0, 8);
 }
-
-export { CATEGORY_COLORS };

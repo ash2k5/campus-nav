@@ -6,19 +6,26 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@mapbox/mapbox-gl-draw": "^1.4.3",
     "firebase": "^12.8.0",
     "lucide-react": "^0.562.0",
-    "next": "16.1.4",
+    "maplibre-gl": "^4.7.1",
+    "next": "16.2.7",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "eslint": "^9",
-    "eslint-config-next": "16.1.4",
-    "tailwindcss": "^4"
+    "eslint-config-next": "16.2.7",
+    "tailwindcss": "^4",
+    "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
   }
 }

@@ -1,54 +1,35 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Map as MapIcon, ShieldCheck, Loader2, MousePointer2, Plus, Users, Navigation, X, Clock, Footprints, Trash2, CheckCircle } from 'lucide-react';
-import { searchBuildings, CATEGORY_COLORS, UC_BUILDINGS } from './buildings';
-import { buildBaseGraph, buildRoutingGraph, findNearestNode, runDijkstra } from './graph';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { db, APP_ID } from './lib/firebase';
+import { CAMPUS_CENTER, MAP_STYLE, EMPTY_GEOJSON } from './lib/constants';
+import { searchBuildings, UC_BUILDINGS } from './buildings';
+import { buildBaseGraph, buildRoutingGraph, findNearestNode, runAStar } from './graph';
+import { useAuth } from './hooks/useAuth';
+import { useShortcuts } from './hooks/useShortcuts';
+import Toast from './components/Toast';
+import SearchHeader from './components/SearchHeader';
+import DirectionsPanel from './components/DirectionsPanel';
+import AdminPanel from './components/AdminPanel';
+import LoginScreen from './components/LoginScreen';
+import LoadingScreen from './components/LoadingScreen';
 
-// Firebase Imports
-import { initializeApp, getApps } from 'firebase/app';
-import { getAnalytics } from 'firebase/analytics';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
-
-// --- CONFIGURATION ---
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
-};
-
-let app, auth, db;
-const APP_ID = "campus-nav-v1";
-
-if (typeof window !== 'undefined' && firebaseConfig.apiKey) {
-  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-  auth = getAuth(app);
-  db = getFirestore(app);
-  if (firebaseConfig.measurementId) getAnalytics(app);
-}
-
-const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
-  .split(',')
-  .map(e => e.trim().toLowerCase())
-  .filter(Boolean);
-
-const CAMPUS_CENTER = [-84.5150, 39.1310];
-const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
-const EMPTY_GEOJSON = { type: 'FeatureCollection', features: [] };
+import 'maplibre-gl/dist/maplibre-gl.css';
+import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 
 export default function Page() {
+  const { user, isAdmin, authStage, logout } = useAuth();
+  const shortcuts = useShortcuts(user);
+
   const mapContainer = useRef(null);
   const map = useRef(null);
   const draw = useRef(null);
   const markerRef = useRef(null);
   const userMarkerRef = useRef(null);
+  const maplibreRef = useRef(null);
 
-  // Refs to avoid stale closures inside map event listeners
+  // Refs avoid stale closures
   const userRef = useRef(null);
   const isAdminRef = useRef(false);
   const shortcutsRef = useRef(EMPTY_GEOJSON);
@@ -58,14 +39,12 @@ export default function Page() {
   const routingGraphRef = useRef(null);  // OSM + custom shortcuts (rebuilt when shortcuts change)
   const osmGeoJsonRef = useRef(null);    // raw GeoJSON of OSM walkable ways (for overlay)
   const pathClickConsumedRef = useRef(false);
+  const lastDrawCreateRef = useRef(0);
   const selectedPathIdRef = useRef(null);
   const selectBuildingRef = useRef(null);
 
-  const [user, setUser] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
-  const [shortcuts, setShortcuts] = useState(EMPTY_GEOJSON);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -74,7 +53,7 @@ export default function Page() {
 
   const [destination, setDestination] = useState(null);
   const [isRouting, setIsRouting] = useState(false);
-  const [routeInfo, setRouteInfo] = useState(null); // { distance, duration, usedShortcutIds }
+  const [routeInfo, setRouteInfo] = useState(null); // { distance, duration, shortcutUsed }
   const [usedShortcutIds, setUsedShortcutIds] = useState(new Set());
 
   const [startQuery, setStartQuery] = useState('');
@@ -85,13 +64,6 @@ export default function Page() {
   const [selectedPathId, setSelectedPathId] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [toast, setToast] = useState(null); // { msg, type: 'success' | 'error' }
-
-  const [authStage, setAuthStage] = useState('loading'); // 'loading' | 'login' | 'app'
-  const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup'
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Keep refs in sync with state
   useEffect(() => { userRef.current = user; }, [user]);
@@ -124,37 +96,6 @@ export default function Page() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
-
-  // Auth
-  useEffect(() => {
-    if (!auth) return;
-    const unsub = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        setIsAdmin(!currentUser.isAnonymous && ADMIN_EMAILS.includes((currentUser.email || '').toLowerCase()));
-        setAuthStage('app');
-      } else {
-        setAuthStage('login');
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  // Load shortcuts from Firestore
-  useEffect(() => {
-    if (!db || !user) return;
-    const ref = collection(db, 'artifacts', APP_ID, 'public', 'data', 'shortcuts');
-    const unsub = onSnapshot(ref, (snapshot) => {
-      const features = snapshot.docs.map(d => ({
-        type: 'Feature',
-        id: d.id,
-        geometry: JSON.parse(d.data().geometry),
-        properties: { ...d.data().properties, _id: d.id }
-      }));
-      setShortcuts({ type: 'FeatureCollection', features });
-    }, (error) => console.error("Firestore error:", error));
-    return () => unsub();
-  }, [user]);
 
   // Load OSM walkable graph for campus (once on mount)
   useEffect(() => {
@@ -199,40 +140,20 @@ export default function Page() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const loadDependencies = async () => {
-      const styles = [
-        'https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css',
-        'https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.css'
-      ];
-      styles.forEach(href => {
-        if (!document.querySelector(`link[href="${href}"]`)) {
-          const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = href;
-          document.head.appendChild(link);
-        }
-      });
+    let cancelled = false;
 
-      const loadScript = (src) => new Promise((resolve, reject) => {
-        if (document.querySelector(`script[src="${src}"]`)) return resolve();
-        const s = document.createElement('script'); s.src = src; s.async = true;
-        s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
-      });
+    const init = async () => {
+      const maplibregl = (await import('maplibre-gl')).default;
+      const MapboxDraw = (await import('@mapbox/mapbox-gl-draw')).default;
+      if (cancelled || map.current || !mapContainer.current) return;
+      maplibreRef.current = maplibregl;
 
-      try {
-        await loadScript('https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js');
-        await loadScript('https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.3/mapbox-gl-draw.js');
-        initMap();
-      } catch (err) { console.error(err); }
-    };
-
-    const initMap = () => {
-      if (!window.maplibregl || !window.MapboxDraw || map.current) return;
-
-      map.current = new window.maplibregl.Map({
+      map.current = new maplibregl.Map({
         container: mapContainer.current, style: MAP_STYLE, center: CAMPUS_CENTER, zoom: 15,
       });
-      map.current.addControl(new window.maplibregl.NavigationControl(), 'top-right');
+      map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
 
-      draw.current = new window.MapboxDraw({
+      draw.current = new MapboxDraw({
         displayControlsDefault: false,
         controls: { line_string: true, trash: true },
         defaultMode: 'simple_select'
@@ -257,7 +178,7 @@ export default function Page() {
           paint: { 'line-color': '#22c55e', 'line-width': 6, 'line-dasharray': [2, 1] }
         });
 
-        // Selected path highlight (red — admin delete mode)
+        // Selected path highlight (red, admin delete mode)
         map.current.addSource('selected-source', { type: 'geojson', data: EMPTY_GEOJSON });
         map.current.addLayer({
           id: 'selected-layer', type: 'line', source: 'selected-source',
@@ -265,7 +186,7 @@ export default function Page() {
           paint: { 'line-color': '#ef4444', 'line-width': 8, 'line-opacity': 0.9 }
         });
 
-        // Active shortcut highlight (amber — currently used for routing)
+        // Active shortcut highlight (amber, currently used for routing)
         map.current.addSource('active-shortcut-source', { type: 'geojson', data: EMPTY_GEOJSON });
         map.current.addLayer({
           id: 'active-shortcut-layer', type: 'line', source: 'active-shortcut-source',
@@ -349,6 +270,7 @@ export default function Page() {
           const feature = e.features[0];
           const currentUser = userRef.current;
           if (!currentUser || !db) return;
+          lastDrawCreateRef.current = Date.now();
 
           const shortcutId = `path_${Date.now()}`;
           try {
@@ -368,13 +290,15 @@ export default function Page() {
         // Click shortcut path to select it (admin only)
         map.current.on('click', 'shortcuts-layer', (e) => {
           if (!isAdminRef.current) return;
+          // ignore finish click
+          if (Date.now() - lastDrawCreateRef.current < 700) return;
           pathClickConsumedRef.current = true;
           const id = e.features[0]?.properties?._id;
           if (!id) return;
           setSelectedPathId(prev => prev === id ? null : id);
         });
 
-        // Cursor: pointer over paths in admin mode
+        // Cursor pointer over paths in admin mode
         map.current.on('mouseenter', 'shortcuts-layer', () => {
           if (isAdminRef.current) map.current.getCanvas().style.cursor = 'pointer';
         });
@@ -393,7 +317,8 @@ export default function Page() {
       map.current.on('draw.modechange', (e) => setIsDrawing(e.mode === 'draw_line_string'));
     };
 
-    loadDependencies();
+    init().catch(err => console.error('Map init failed:', err));
+    return () => { cancelled = true; };
   }, []);
 
   // Sync shortcuts to map
@@ -416,7 +341,7 @@ export default function Page() {
     map.current.setLayoutProperty('shortcuts-layer', 'visibility', visible ? 'visible' : 'none');
   }, [isAdmin, isDrawing, isMapLoaded]);
 
-  // Sync active shortcut highlight to map (all shortcuts actually traversed by Dijkstra)
+  // Highlight shortcuts used by the route
   useEffect(() => {
     if (!isMapLoaded || !map.current?.getSource('active-shortcut-source')) return;
     const features = shortcuts.features.filter(f => usedShortcutIds.has(f.id));
@@ -436,7 +361,7 @@ export default function Page() {
     }
   }, [selectedPathId, shortcuts, isMapLoaded]);
 
-  // Admin draw controls — deselect when leaving admin mode
+  // Admin draw controls, deselect when leaving admin mode
   useEffect(() => {
     if (!isMapLoaded || !map.current || !draw.current) return;
     if (isAdmin) {
@@ -465,7 +390,7 @@ export default function Page() {
     }
     if (markerRef.current) markerRef.current.remove();
     if (map.current) {
-      markerRef.current = new window.maplibregl.Marker({ color: '#2563eb' })
+      markerRef.current = new maplibreRef.current.Marker({ color: '#2563eb' })
         .setLngLat([result.lng, result.lat])
         .addTo(map.current);
       map.current.flyTo({ center: [result.lng, result.lat], zoom: 17, duration: 1000 });
@@ -512,7 +437,7 @@ export default function Page() {
     setUsedShortcutIds(new Set());
 
     try {
-      // ── 1. Resolve start position ─────────────────────────────────────────
+      // Resolve start position
       let fromLng, fromLat;
 
       if (startLocation) {
@@ -537,21 +462,21 @@ export default function Page() {
         fromLat = position.coords.latitude;
       }
 
-      // ── 2. Place start marker ─────────────────────────────────────────────
+      // Place start marker
       if (userMarkerRef.current) userMarkerRef.current.remove();
-      userMarkerRef.current = new window.maplibregl.Marker({ color: '#16a34a' })
+      userMarkerRef.current = new maplibreRef.current.Marker({ color: '#16a34a' })
         .setLngLat([fromLng, fromLat])
         .addTo(map.current);
 
-      // ── 3. Ensure graph is ready ──────────────────────────────────────────
+      // Ensure graph is ready
       const graph = routingGraphRef.current;
       if (!graph) {
         showToast('Routing graph still loading — try again in a moment', 'error');
         return;
       }
 
-      // ── 4. Snap start and end to nearest graph nodes ──────────────────────
-      // If destination has multiple entrances, pick the one closest to the user
+      // Snap start and end to graph nodes
+      // Pick entrance closest to user
       let destLat = destination.lat, destLng = destination.lng;
       if (destination.entrances?.length) {
         let best = null, bestDist = Infinity;
@@ -562,21 +487,19 @@ export default function Page() {
         if (best) { destLat = best.lat; destLng = best.lng; }
       }
 
-      const startNodeId = findNearestNode(graph.nodes, fromLat, fromLng, 500);
-      const endNodeId   = findNearestNode(graph.nodes, destLat, destLng, 500);
+      const startNodeId = findNearestNode(graph.nodes, fromLat, fromLng, 500, graph.index);
+      const endNodeId   = findNearestNode(graph.nodes, destLat, destLng, 500, graph.index);
 
       if (!startNodeId) { showToast('Your location is too far from campus', 'error'); return; }
       if (!endNodeId)   { showToast('Destination not in routing graph', 'error');     return; }
 
-      // ── 5. Run Dijkstra on combined OSM + shortcut graph ──────────────────
-      const result = runDijkstra(graph.nodes, graph.edges, startNodeId, endNodeId);
+      // Run A*
+      const result = runAStar(graph.nodes, graph.edges, startNodeId, endNodeId);
       if (!result) { showToast('No route found between these points', 'error'); return; }
 
       const { coords, pathNodeIds, totalDistM } = result;
 
-      // ── 6. Detect which custom shortcuts were actually traversed ──────────
-      // Only count a shortcut if two consecutive path nodes are both from it,
-      // meaning an actual drawn edge was used (not just an endpoint relay node).
+      // Count traversed shortcut edges
       const usedIds = new Set();
       for (let i = 0; i < pathNodeIds.length - 1; i++) {
         const fid1 = graph.syntheticToFeatureId?.get(pathNodeIds[i]);
@@ -585,7 +508,7 @@ export default function Page() {
       }
       setUsedShortcutIds(usedIds);
 
-      // ── 7. Render route on map ────────────────────────────────────────────
+      // Render route on map
       map.current.getSource('route-source').setData({
         type: 'FeatureCollection',
         features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } }],
@@ -593,12 +516,12 @@ export default function Page() {
 
       const bounds = coords.reduce(
         (b, c) => b.extend(c),
-        new window.maplibregl.LngLatBounds(coords[0], coords[0])
+        new maplibreRef.current.LngLatBounds(coords[0], coords[0])
       );
       map.current.fitBounds(bounds, { padding: 80, duration: 1000 });
 
-      // ── 8. Update route info panel ────────────────────────────────────────
-      const walkSpeedMs = 1.4; // m/s average walking pace
+      // Update route info panel
+      const walkSpeedMs = 1.4; // average walking pace m/s
       setRouteInfo({
         distance: (totalDistM * 0.000621371).toFixed(2),
         duration: Math.ceil(totalDistM / walkSpeedMs / 60),
@@ -629,43 +552,8 @@ export default function Page() {
     }
   };
 
-  const AUTH_ERRORS = {
-    'auth/invalid-credential': 'Invalid email or password.',
-    'auth/invalid-email': 'Enter a valid email address.',
-    'auth/too-many-requests': 'Too many attempts — try again later.',
-    'auth/user-not-found': 'No account found with that email.',
-    'auth/wrong-password': 'Incorrect password.',
-    'auth/email-already-in-use': 'An account with that email already exists.',
-    'auth/weak-password': 'Password must be at least 6 characters.',
-  };
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setIsLoggingIn(true);
-    setLoginError('');
-    try {
-      await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
-    } catch (err) {
-      setLoginError(AUTH_ERRORS[err.code] || 'Login failed. Check your credentials.');
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleSignUp = async (e) => {
-    e.preventDefault();
-    setIsLoggingIn(true);
-    setLoginError('');
-    try {
-      await createUserWithEmailAndPassword(auth, loginEmail, loginPassword);
-    } catch (err) {
-      setLoginError(AUTH_ERRORS[err.code] || `Sign up failed: ${err.code}`);
-      setIsLoggingIn(false);
-    }
-  };
-
   const handleSignOut = async () => {
-    await signOut(auth);
-    setIsAdmin(false);
+    await logout();
     clearDestination();
   };
 
@@ -681,54 +569,16 @@ export default function Page() {
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-50 overflow-hidden relative">
 
-      {/* Toast */}
-      {toast && (
-        <div className={`absolute top-24 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-2xl shadow-lg text-sm font-bold transition-all ${toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-slate-800 text-white'}`}>
-          {toast.type !== 'error' && <CheckCircle size={14} />}
-          {toast.msg}
-        </div>
-      )}
+      <Toast toast={toast} />
 
-      {/* Search Header */}
-      <header className="absolute top-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-md px-4 pointer-events-none">
-        <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-slate-200 p-2 flex items-center gap-2 pointer-events-auto">
-          <div className="p-2 bg-blue-600 text-white rounded-xl shadow-lg"><MapIcon size={20} /></div>
-          <div className="flex-1 relative">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={handleSearchInput}
-              placeholder="Search campus buildings..."
-              className="w-full bg-transparent outline-none px-2 font-medium text-slate-700"
-            />
-            {searchResults.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50">
-                {searchResults.map((r) => (
-                  <button
-                    key={r.name}
-                    onClick={() => handleSelectResult(r)}
-                    className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-blue-50 border-b border-slate-50 last:border-0 flex items-center gap-2"
-                  >
-                    <span>{CATEGORY_COLORS[r.category] || '📍'}</span>
-                    <span>{r.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          {isAdmin && (
-            <span className="flex items-center gap-1 px-3 py-1.5 bg-amber-100 text-amber-700 rounded-xl text-xs font-bold">
-              <ShieldCheck size={14} /> Admin
-            </span>
-          )}
-          <button
-            onClick={handleSignOut}
-            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs transition-all"
-          >
-            Sign Out
-          </button>
-        </div>
-      </header>
+      <SearchHeader
+        searchQuery={searchQuery}
+        searchResults={searchResults}
+        onSearchInput={handleSearchInput}
+        onSelectResult={handleSelectResult}
+        isAdmin={isAdmin}
+        onSignOut={handleSignOut}
+      />
 
       <main className="flex-1 w-full h-full relative z-10">
         <div
@@ -737,217 +587,38 @@ export default function Page() {
           style={{ cursor: isDrawing ? 'crosshair' : 'grab' }}
         />
 
-        {/* Directions Panel */}
         {destination && (
-          <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-30 bg-white rounded-3xl shadow-2xl border border-slate-100 w-80 p-5">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <p className="text-xs font-bold text-blue-600 uppercase tracking-widest mb-0.5">
-                  {CATEGORY_COLORS[destination.category]} {destination.category}
-                </p>
-                <h3 className="font-bold text-slate-800 text-sm leading-tight">{destination.name}</h3>
-              </div>
-              <button onClick={clearDestination} className="text-slate-400 hover:text-slate-600 p-1">
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Optional start location */}
-            <div className="mb-3 relative">
-              <p className="text-xs text-slate-400 font-semibold mb-1">From</p>
-              <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
-                <Navigation size={13} className="text-green-500 shrink-0" />
-                <input
-                  type="text"
-                  value={startQuery}
-                  onChange={handleStartInput}
-                  placeholder="Your location (GPS)"
-                  className="flex-1 bg-transparent outline-none text-sm text-slate-700 font-medium"
-                />
-                {startLocation && (
-                  <button onClick={clearStart} className="text-slate-400 hover:text-slate-600">
-                    <X size={13} />
-                  </button>
-                )}
-              </div>
-              {startResults.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50">
-                  {startResults.map((r) => (
-                    <button
-                      key={r.name}
-                      onClick={() => handleSelectStart(r)}
-                      className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-blue-50 border-b border-slate-50 last:border-0 flex items-center gap-2"
-                    >
-                      <span>{CATEGORY_COLORS[r.category] || '📍'}</span>
-                      <span>{r.name}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {routeInfo && (
-              <>
-                <div className="flex gap-3 mb-3">
-                  <div className="flex-1 bg-blue-50 rounded-xl p-3 text-center">
-                    <Footprints size={14} className="text-blue-500 mx-auto mb-1" />
-                    <p className="font-bold text-slate-800 text-sm">{routeInfo.distance} mi</p>
-                    <p className="text-xs text-slate-400">distance</p>
-                  </div>
-                  <div className="flex-1 bg-blue-50 rounded-xl p-3 text-center">
-                    <Clock size={14} className="text-blue-500 mx-auto mb-1" />
-                    <p className="font-bold text-slate-800 text-sm">{routeInfo.duration} min</p>
-                    <p className="text-xs text-slate-400">walk</p>
-                  </div>
-                </div>
-                {routeInfo.shortcutUsed && (
-                  <div className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 mb-3">
-                    <span className="text-amber-500 text-base">⚡</span>
-                    <div>
-                      <p className="text-xs font-bold text-amber-700">Campus shortcut used</p>
-                      <p className="text-xs text-amber-600">Optimal route — follow the yellow path</p>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-            <button
-              onClick={getDirections}
-              disabled={isRouting}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95"
-            >
-              {isRouting
-                ? <><Loader2 size={16} className="animate-spin" /> {startLocation ? 'Getting route...' : 'Getting location...'}</>
-                : <><Navigation size={16} /> {routeInfo ? 'Reroute' : 'Get Walking Directions'}</>
-              }
-            </button>
-          </div>
+          <DirectionsPanel
+            destination={destination}
+            onClear={clearDestination}
+            startQuery={startQuery}
+            onStartInput={handleStartInput}
+            startLocation={startLocation}
+            onClearStart={clearStart}
+            startResults={startResults}
+            onSelectStart={handleSelectStart}
+            routeInfo={routeInfo}
+            isRouting={isRouting}
+            onGetDirections={getDirections}
+          />
         )}
 
-        {/* Admin Panel */}
         {isAdmin && (
-          <div className="absolute bottom-10 left-6 z-30 bg-white p-6 rounded-3xl shadow-2xl border border-slate-100 w-80 space-y-3">
-            <h3 className="font-bold text-slate-800 flex items-center gap-2">
-              <Users size={18} className="text-blue-500" /> Collaborative Editor
-            </h3>
-
-            {selectedPathId ? (
-              <>
-                <div className="bg-red-50 border border-red-100 p-3 rounded-xl text-[11px] text-red-700 font-bold">
-                  Path selected — highlighted in red on the map
-                </div>
-                <button
-                  onClick={deleteSelectedPath}
-                  disabled={isDeleting}
-                  className="w-full bg-red-500 hover:bg-red-600 disabled:bg-slate-100 disabled:text-slate-400 text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95"
-                >
-                  {isDeleting
-                    ? <><Loader2 size={16} className="animate-spin" /> Deleting...</>
-                    : <><Trash2 size={16} /> Delete This Path</>
-                  }
-                </button>
-                <button
-                  onClick={() => setSelectedPathId(null)}
-                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2.5 rounded-2xl text-sm transition-all"
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <>
-                {isDrawing ? (
-                  <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl text-[11px] text-blue-700 font-bold flex gap-2">
-                    <MousePointer2 size={14} className="shrink-0 mt-0.5" />
-                    Click to place points. Double-click to finish — path saves automatically.
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-xs text-slate-400">
-                      Draw new paths, or click an existing green path to select and delete it.
-                    </p>
-                    <button
-                      onClick={() => setShowOsmPaths(v => !v)}
-                      className={`w-full py-2 rounded-2xl text-xs font-bold transition-all ${showOsmPaths ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                    >
-                      {showOsmPaths ? 'Hide OSM Paths' : 'Show OSM Paths'}
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={startDrawingMode}
-                  disabled={isDrawing}
-                  className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-slate-100 disabled:text-slate-400 text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
-                >
-                  <Plus size={18} /> {isDrawing ? 'Drawing...' : 'Start New Path'}
-                </button>
-              </>
-            )}
-          </div>
+          <AdminPanel
+            isDrawing={isDrawing}
+            selectedPathId={selectedPathId}
+            isDeleting={isDeleting}
+            showOsmPaths={showOsmPaths}
+            onDelete={deleteSelectedPath}
+            onCancelSelect={() => setSelectedPathId(null)}
+            onToggleOsmPaths={() => setShowOsmPaths(v => !v)}
+            onStartDrawing={startDrawingMode}
+          />
         )}
       </main>
 
-      {/* Login screen */}
-      {authStage === 'login' && (
-        <div className="absolute inset-0 z-50 bg-linear-to-br from-blue-50 to-slate-100 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 w-full max-w-sm p-8">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-2.5 bg-blue-600 text-white rounded-xl shadow"><MapIcon size={22} /></div>
-              <div>
-                <h1 className="font-bold text-slate-800 text-lg leading-tight">UC CampusPathFinder</h1>
-                <p className="text-xs text-slate-400">Sign in to continue</p>
-              </div>
-            </div>
-
-            {/* Toggle */}
-            <div className="flex bg-slate-100 rounded-2xl p-1 mb-5">
-              <button
-                onClick={() => { setAuthMode('login'); setLoginError(''); }}
-                className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${authMode === 'login' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}
-              >Sign In</button>
-              <button
-                onClick={() => { setAuthMode('signup'); setLoginError(''); }}
-                className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${authMode === 'signup' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}
-              >Create Account</button>
-            </div>
-
-            <form onSubmit={authMode === 'login' ? handleLogin : handleSignUp} className="space-y-3 mb-4">
-              <input
-                type="email"
-                value={loginEmail}
-                onChange={e => setLoginEmail(e.target.value)}
-                placeholder="Email"
-                required
-                className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-slate-700 font-medium outline-none focus:ring-2 focus:ring-blue-200 text-sm"
-              />
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={e => setLoginPassword(e.target.value)}
-                placeholder={authMode === 'signup' ? 'Password (min 6 characters)' : 'Password'}
-                required
-                className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-slate-700 font-medium outline-none focus:ring-2 focus:ring-blue-200 text-sm"
-              />
-              {loginError && <p className="text-xs text-red-500 font-semibold px-1">{loginError}</p>}
-              <button
-                type="submit"
-                disabled={isLoggingIn}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transition-all"
-              >
-                {isLoggingIn && <Loader2 size={16} className="animate-spin" />}
-                {isLoggingIn ? (authMode === 'login' ? 'Signing in...' : 'Creating account...') : (authMode === 'login' ? 'Sign In' : 'Create Account')}
-              </button>
-            </form>
-
-          </div>
-        </div>
-      )}
-
-      {/* Loading screen (after login, while map/auth initializes) */}
-      {authStage === 'loading' && (
-        <div className="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center gap-4">
-          <Loader2 className="animate-spin text-blue-600" size={48} />
-          <p className="font-bold text-slate-400 uppercase tracking-widest text-xs">Connecting...</p>
-        </div>
-      )}
+      {authStage === 'login' && <LoginScreen />}
+      {authStage === 'loading' && <LoadingScreen />}
     </div>
   );
 }
