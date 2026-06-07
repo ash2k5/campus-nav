@@ -16,7 +16,16 @@ const WALKABLE = new Set([
   'unclassified', 'cycleway', 'track', 'corridor',
 ]);
 
+// The campus walk network is effectively static, so cache the
+// filtered response and avoid hammering the rate-limited Overpass API.
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+let cache = { at: 0, data: null };
+
 export async function GET() {
+  if (cache.data && Date.now() - cache.at < CACHE_TTL_MS) {
+    return Response.json(cache.data);
+  }
+
   for (const endpoint of ENDPOINTS) {
     try {
       const body = `data=${encodeURIComponent(QUERY)}`;
@@ -39,6 +48,10 @@ export async function GET() {
       }
 
       const data = await res.json();
+      if (!Array.isArray(data.elements)) {
+        console.error(`${endpoint} returned an unexpected payload`);
+        continue;
+      }
 
       // Keep only walkable ways + all nodes
       data.elements = data.elements.filter(el =>
@@ -46,6 +59,7 @@ export async function GET() {
         (el.type === 'way' && WALKABLE.has(el.tags?.highway))
       );
 
+      cache = { at: Date.now(), data };
       return Response.json(data);
     } catch (err) {
       console.error(`${endpoint} failed:`, err.message);

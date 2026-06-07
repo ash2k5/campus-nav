@@ -45,7 +45,7 @@ export function buildBaseGraph(osmData) {
   }
 
   for (const el of osmData.elements) {
-    if (el.type !== 'way') continue;
+    if (el.type !== 'way' || !Array.isArray(el.nodes)) continue;
     for (let i = 0; i < el.nodes.length - 1; i++) {
       const aId = el.nodes[i], bId = el.nodes[i + 1];
       const a = nodes.get(aId), b = nodes.get(bId);
@@ -118,7 +118,8 @@ export function buildRoutingGraph(baseGraph, shortcuts) {
   const baseIndex = buildSpatialIndex(baseGraph.nodes);
 
   for (const feature of shortcuts.features) {
-    const coords = feature.geometry.coordinates; // [[lng, lat], ...]
+    const coords = feature.geometry?.coordinates; // [[lng, lat], ...]
+    if (!Array.isArray(coords) || coords.length < 2) continue;
     const ids = coords.map((_, i) => `sc:${feature.id}:${i}`);
 
     // Add synthetic nodes
