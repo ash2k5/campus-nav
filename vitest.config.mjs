@@ -17,6 +17,7 @@ export default defineConfig({
   plugins: [jsxInJs, react()],
   test: {
     include: ['tests/**/*.test.{js,jsx}'],
+    exclude: ['**/node_modules/**', 'tests/rules/**'],
     environment: 'node',
     globals: true,
   },

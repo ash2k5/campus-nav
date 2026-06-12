@@ -18,7 +18,13 @@ service cloud.firestore {
     match /artifacts/{appId}/public/data/shortcuts/{shortcutId} {
       allow read: if true;
       allow create: if isAdmin()
-        && request.resource.data.properties.creator == request.auth.uid;
+        && request.resource.data.keys().hasOnly(['geometry', 'properties'])
+        && request.resource.data.geometry is string
+        && request.resource.data.geometry.size() > 0
+        && request.resource.data.geometry.size() < 100000
+        && request.resource.data.properties.keys().hasOnly(['creator', 'timestamp'])
+        && request.resource.data.properties.creator == request.auth.uid
+        && request.resource.data.properties.timestamp is string;
       allow delete: if isAdmin();
     }
 
