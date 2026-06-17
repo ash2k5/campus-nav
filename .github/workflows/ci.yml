@@ -6,13 +6,8 @@ on:
   pull_request:
     branches: [main]
 
-# Installing @ash2k5/cinematic-ds from GitHub Packages; .npmrc reads this token.
-env:
-  NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 permissions:
   contents: read
-  packages: read
 
 jobs:
   build:
