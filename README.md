@@ -4,7 +4,7 @@ A walking-navigation web app for the University of Cincinnati campus. Search bui
 pedestrian routes computed on real OpenStreetMap walkways, and (as an admin) draw custom
 shortcuts that fold into the routing graph live.
 
-https://campus-nav.vercel.app
+https://campusnav.ask2k5.com
 
 Built with Next.js, React, TypeScript, MapLibre, and Firebase (Auth + Firestore), on the
 shared `@ash2k5/ui` design system (light + dark).
