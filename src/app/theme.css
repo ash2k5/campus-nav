@@ -3,8 +3,13 @@
 :root {
   --primary: #c20e2f;
   --on-primary: #ffffff;
+  /* opaque panels over the map */
+  --glass-fill: rgba(255, 255, 255, 0.96);
+  --glass-border: var(--outline-variant);
 }
 [data-theme="dark"] {
   --primary: #ff8a93;
   --on-primary: #3a0c12;
+  --glass-fill: rgba(20, 19, 19, 0.94);
+  --glass-border: var(--outline-variant);
 }
