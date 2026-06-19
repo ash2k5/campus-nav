@@ -78,7 +78,7 @@ export default function LoginScreen() {
           </div>
           <div>
             <h1 className="font-display text-xl font-semibold leading-tight text-on-surface">
-              UC CampusPathFinder
+              CampusNav
             </h1>
             <p className="ds-label-sm text-on-surface-variant">
               Sign in to continue
