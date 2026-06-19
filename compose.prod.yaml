@@ -1,4 +1,4 @@
-name: uc-campus-prod
+name: campus-nav-prod
 
 services:
   emulator:

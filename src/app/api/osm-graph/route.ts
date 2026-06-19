@@ -49,7 +49,7 @@ export async function GET() {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           "Accept": "*/*",
-          "User-Agent": "CampusPathFinder/1.0",
+          "User-Agent": "CampusNav/1.0",
         },
         body,
         signal: AbortSignal.timeout(28000),
